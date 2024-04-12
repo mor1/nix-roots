@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+#
+# Copyright (C) 2024, Richard Mortier <mort@cantab.net>
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+import logging
+import os
+import subprocess
+import sys
+
+from rich.console import Console
+from rich.logging import RichHandler
+from strip_ansi import strip_ansi
+
+errcon = Console(stderr=True)
+logging.basicConfig(
+    level="INFO",
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(console=errcon, rich_tracebacks=True)],
+)
+log = logging.getLogger(__name__)
+
+
+def fail(s: str, n: int = -1) -> None:
+    log.critical(s)
+    sys.exit(n)
+
+
+if __name__ == "__main__":
+    log.setLevel(logging.INFO)
+    PATH = "/nix/store"
+    CACHED = True
+
+    log.info(f"gathering package sizes {PATH=} {CACHED=}")
+    duasizes = {}
+    if not CACHED:
+        proc = subprocess.run(
+            ["dua", "-lxA", "-f", "bytes", "aggregate", "--no-sort", PATH],
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        lines = strip_ansi(proc.stdout).split("\n")
+    else:
+        with open("dua_cache") as o:
+            lines = strip_ansi(o.read()).split("\n")
+
+    for line in lines:
+        if len(line) == 0:
+            continue
+        size, *path = line.strip().split(" b ")
+        path = " b ".join(path)
+        duasizes[path] = int(size)
+    log.debug(f"{duasizes=}")
+
+    sizes = {}
+    for path in duasizes:
+        fullpath = f"{PATH}/{path}"
+        isdir = os.path.isdir(fullpath)
+        log.info(f"{path=}...{'skipping' if not isdir else ''}")
+        if not isdir:
+            continue
+        proc = subprocess.run(
+            ["nix-store", "--query", "--roots", f"{fullpath}"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        if proc.returncode == 0:
+            roots = list(
+                filter(lambda s: not s.startswith("/proc"), proc.stdout.split("\n"))
+            )
+            log.debug(f"{path=} {duasizes[path]=} {roots=}")
+
+            for root in [r for r in roots if len(r) > 0]:
+                s, t = root.split(" -> ")
+                log.debug(f"{s=} {t=}")
+
+                sizes[s] = sizes.get(s, 0) + duasizes[path]
+                sizes[t] = sizes.get(t, 0) + duasizes[path]
+
+    log.debug(f"{sizes=}")
+    for k, v in sorted(sizes.items(), key=lambda e: e[1]):
+        print(f"{v}\t{k}")
