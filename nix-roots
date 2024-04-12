@@ -7,7 +7,6 @@
 import logging
 import os
 import subprocess
-import sys
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -21,11 +20,6 @@ logging.basicConfig(
     handlers=[RichHandler(console=errcon, rich_tracebacks=True)],
 )
 log = logging.getLogger(__name__)
-
-
-def fail(s: str, n: int = -1) -> None:
-    log.critical(s)
-    sys.exit(n)
 
 
 if __name__ == "__main__":
